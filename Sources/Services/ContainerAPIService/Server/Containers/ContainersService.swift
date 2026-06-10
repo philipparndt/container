@@ -602,6 +602,18 @@ public actor ContainersService {
 
     /// Stop all containers inside the sandbox, aborting any processes currently
     /// executing inside the container, before stopping the underlying sandbox.
+    public func pause(id: String) async throws {
+        let state = try self._getContainerState(id: id)
+        let client = try state.getClient()
+        try await client.pause()
+    }
+
+    public func resume(id: String) async throws {
+        let state = try self._getContainerState(id: id)
+        let client = try state.getClient()
+        try await client.resume()
+    }
+
     public func stop(id: String, options: ContainerStopOptions) async throws {
         log.debug(
             "ContainersService: enter",

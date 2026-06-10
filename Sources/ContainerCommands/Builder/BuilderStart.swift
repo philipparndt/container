@@ -203,6 +203,10 @@ extension Application {
                         .invalidState,
                         message: "builder is stopping, please wait until it is fully stopped before proceeding"
                     )
+                case .paused:
+                    // A paused builder holds its state; resume and reuse it.
+                    try await client.resume(id: existingContainer.id)
+                    return
                 case .unknown:
                     break
                 }

@@ -195,6 +195,32 @@ extension RuntimeClient {
         }
     }
 
+    public func pause() async throws {
+        let request = XPCMessage(route: RuntimeRoutes.pause.rawValue)
+        do {
+            try await self.client.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to pause container \(self.id)",
+                cause: error
+            )
+        }
+    }
+
+    public func resume() async throws {
+        let request = XPCMessage(route: RuntimeRoutes.resume.rawValue)
+        do {
+            try await self.client.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to resume container \(self.id)",
+                cause: error
+            )
+        }
+    }
+
     public func kill(_ id: String, signal: String) async throws {
         let request = XPCMessage(route: RuntimeRoutes.kill.rawValue)
         request.set(key: RuntimeKeys.id.rawValue, value: id)

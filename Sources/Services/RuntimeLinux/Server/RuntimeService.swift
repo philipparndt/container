@@ -497,6 +497,16 @@ public actor RuntimeService {
                 status: RuntimeStatus.running,
                 networks: networks
             )
+        case .paused:
+            let ctr = try getContainer()
+
+            status = .paused
+            networks = ctr.attachments
+            cs = ContainerSnapshot(
+                configuration: ctr.config,
+                status: RuntimeStatus.paused,
+                networks: networks
+            )
         }
 
         let reply = message.reply()
@@ -552,6 +562,50 @@ public actor RuntimeService {
             default:
                 break
             }
+            return message.reply()
+        }
+    }
+
+    /// Pause the sandbox virtual machine, freezing the guest in memory.
+    ///
+    /// - Parameters:
+    ///   - message: An XPC message with no parameters.
+    ///
+    /// - Returns: An XPC message with no parameters.
+    @Sendable
+    public func pause(_ message: XPCMessage) async throws -> XPCMessage {
+        self.log.debug("enter", metadata: ["func": "\(#function)"])
+        defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
+
+        return try await self.lock.withLock { _ in
+            guard case .running = await self.state else {
+                throw ContainerizationError(.invalidState, message: "sandbox is not running")
+            }
+            let ctr = try await self.getContainer()
+            try await ctr.container.pause()
+            await self.setState(.paused)
+            return message.reply()
+        }
+    }
+
+    /// Resume a paused sandbox virtual machine.
+    ///
+    /// - Parameters:
+    ///   - message: An XPC message with no parameters.
+    ///
+    /// - Returns: An XPC message with no parameters.
+    @Sendable
+    public func resume(_ message: XPCMessage) async throws -> XPCMessage {
+        self.log.debug("enter", metadata: ["func": "\(#function)"])
+        defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
+
+        return try await self.lock.withLock { _ in
+            guard case .paused = await self.state else {
+                throw ContainerizationError(.invalidState, message: "sandbox is not paused")
+            }
+            let ctr = try await self.getContainer()
+            try await ctr.container.resume()
+            await self.setState(.running)
             return message.reply()
         }
     }
@@ -1617,6 +1671,8 @@ extension RuntimeService {
         case booted
         /// startProcess on the init process will transition .booted to .running.
         case running
+        /// pause() transitions .running to .paused; resume() transitions back.
+        case paused
         /// At the beginning of stop() .running will be transitioned to .stopping.
         case stopping
         /// Once a stop is successful, .stopping will transition to .stopped.

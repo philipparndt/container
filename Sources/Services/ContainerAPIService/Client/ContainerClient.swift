@@ -195,6 +195,36 @@ public struct ContainerClient: Sendable {
         }
     }
 
+    /// Pause the container, freezing its virtual machine in memory.
+    public func pause(id: String) async throws {
+        do {
+            let request = XPCMessage(route: .containerPause)
+            request.set(key: .id, value: id)
+            try await xpcClient.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to pause container",
+                cause: error
+            )
+        }
+    }
+
+    /// Resume a paused container.
+    public func resume(id: String) async throws {
+        do {
+            let request = XPCMessage(route: .containerResume)
+            request.set(key: .id, value: id)
+            try await xpcClient.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to resume container",
+                cause: error
+            )
+        }
+    }
+
     /// Delete the container along with any resources.
     public func delete(id: String, force: Bool = false) async throws {
         do {

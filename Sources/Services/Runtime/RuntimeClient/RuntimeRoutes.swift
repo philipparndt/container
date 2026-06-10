@@ -29,6 +29,10 @@ public enum RuntimeRoutes: String {
     case bootstrap = "com.apple.container.runtime/bootstrap"
     /// Stop the sandbox and all processes running inside it.
     case stop = "com.apple.container.runtime/stop"
+    /// Pause the sandbox virtual machine.
+    case pause = "com.apple.container.runtime/pause"
+    /// Resume a paused sandbox virtual machine.
+    case resume = "com.apple.container.runtime/resume"
     /// Return the current state of the sandbox.
     case state = "com.apple.container.runtime/state"
     /// Get resource usage statistics for the sandbox.
