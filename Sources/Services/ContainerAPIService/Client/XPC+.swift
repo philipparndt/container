@@ -156,6 +156,7 @@ public enum XPCRoute: String {
     case containerStop
     case containerPause
     case containerResume
+    case containerSuspend
     case containerDial
     case containerResize
     case containerKill

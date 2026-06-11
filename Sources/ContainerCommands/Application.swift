@@ -69,6 +69,7 @@ public struct Application: AsyncLoggableCommand {
                     ContainerStop.self,
                     ContainerPause.self,
                     ContainerResume.self,
+                    ContainerSuspend.self,
                     ContainerPrune.self,
                 ]
             ),

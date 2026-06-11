@@ -26,6 +26,7 @@ import ContainerizationExtras
 import ContainerizationOCI
 import ContainerizationOS
 import Foundation
+import Virtualization
 import Logging
 import NIO
 import NIOFoundationCompat
@@ -181,6 +182,14 @@ public actor RuntimeService {
 
             let networkBootstrapInfos = try message.networkBootstrapInfos()
 
+            // When restoring a suspended sandbox, reuse the saved MAC
+            // addresses so the virtual machine configuration matches the
+            // saved state and the network leases are re-acquired.
+            var savedAttachments: [Attachment] = []
+            if let data = try? Data(contentsOf: self.vmAttachmentsURL) {
+                savedAttachments = (try? JSONDecoder().decode([Attachment].self, from: data)) ?? []
+            }
+
             var sessions: [XPCClientSession] = []
             var attachments: [Attachment] = []
             var interfaces: [Interface] = []
@@ -190,9 +199,13 @@ public actor RuntimeService {
                     let client = ContainerNetworkClient.NetworkClient(id: attachmentConfig.network, plugin: info.plugin)
                     let session = client.connect()
                     sessions.append(session)
+                    var macAddress = attachmentConfig.options.macAddress
+                    if index < savedAttachments.count {
+                        macAddress = savedAttachments[index].macAddress
+                    }
                     var (attachment, additionalData) = try await client.allocate(
                         hostname: attachmentConfig.options.hostname,
-                        macAddress: attachmentConfig.options.macAddress,
+                        macAddress: macAddress,
                         on: session
                     )
                     if let mtu = attachmentConfig.options.mtu {
@@ -282,6 +295,7 @@ public actor RuntimeService {
                 }
                 czConfig.hosts = Hosts(entries: hostsEntries)
                 czConfig.bootLog = BootLog.file(path: bundle.bootlog, append: true)
+                czConfig.machineIdentifier = try self.stableMachineIdentifier()
             }
 
             let ctrInfo = ContainerInfo(
@@ -295,14 +309,24 @@ public actor RuntimeService {
             await self.setNetworkSessions(sessions)
 
             do {
-                try await container.create()
+                let restoring = FileManager.default.fileExists(atPath: self.vmStateURL.path)
+                if restoring {
+                    // The sandbox was suspended to disk: restore the virtual
+                    // machine instead of booting it. The guest, including
+                    // the workload, continues where it was suspended.
+                    try await container.restore(from: self.vmStateURL)
+                    try FileManager.default.removeItem(at: self.vmStateURL)
+                    try? FileManager.default.removeItem(at: self.vmAttachmentsURL)
+                } else {
+                    try await container.create()
+                }
 
                 try await self.initializeWaiters(for: id)
                 try await self.monitor.registerProcess(id: config.id, onExit: self.onContainerExit)
                 if !container.interfaces.isEmpty {
                     try await self.startSocketForwarders(attachment: attachments[0], publishedPorts: config.publishedPorts)
                 }
-                await self.setState(.booted)
+                await self.setState(restoring ? .running : .booted)
             } catch {
                 do {
                     try await self.cleanUpContainer(containerInfo: ctrInfo)
@@ -334,6 +358,11 @@ public actor RuntimeService {
             let containerInfo = try await self.getContainer()
             let containerId = containerInfo.container.id
             if id == containerId {
+                if case .running = await self.state {
+                    // Restored from a suspended state: the init process is
+                    // already running inside the guest.
+                    return message.reply()
+                }
                 try await self.startInitProcess(lock: lock)
                 await self.setState(.running)
             } else {
@@ -562,6 +591,61 @@ public actor RuntimeService {
             default:
                 break
             }
+            return message.reply()
+        }
+    }
+
+    /// The location of saved virtual machine state for suspended sandboxes.
+    private nonisolated var vmStateURL: URL {
+        self.root.appendingPathComponent("vmstate.czs")
+    }
+
+    /// The persisted network attachments of a suspended sandbox.
+    private nonisolated var vmAttachmentsURL: URL {
+        self.root.appendingPathComponent("vmstate-attachments.json")
+    }
+
+    /// The persisted platform machine identifier. Saved virtual machine
+    /// state is bound to it, so it must be stable across boots.
+    private nonisolated var machineIdentifierURL: URL {
+        self.root.appendingPathComponent("machine-identifier.bin")
+    }
+
+    private nonisolated func stableMachineIdentifier() throws -> Data {
+        if let data = try? Data(contentsOf: self.machineIdentifierURL) {
+            return data
+        }
+        let data = VZGenericMachineIdentifier().dataRepresentation
+        try data.write(to: self.machineIdentifierURL)
+        return data
+    }
+
+    /// Suspend the sandbox: save the virtual machine state to disk and stop
+    /// the virtual machine, releasing its CPU and memory. The sandbox is
+    /// restored on the next bootstrap.
+    ///
+    /// - Parameters:
+    ///   - message: An XPC message with no parameters.
+    ///
+    /// - Returns: An XPC message with no parameters.
+    @Sendable
+    public func suspend(_ message: XPCMessage) async throws -> XPCMessage {
+        self.log.debug("enter", metadata: ["func": "\(#function)"])
+        defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
+
+        return try await self.lock.withLock { _ in
+            guard case .running = await self.state else {
+                throw ContainerizationError(.invalidState, message: "sandbox is not running")
+            }
+            let ctr = try await self.getContainer()
+            await self.stopSocketForwarders()
+            // The restored virtual machine configuration must be identical
+            // to the suspended one: persist the network attachments so the
+            // next bootstrap reuses their MAC addresses.
+            let attachmentData = try JSONEncoder().encode(ctr.attachments)
+            try attachmentData.write(to: self.vmAttachmentsURL)
+            try await ctr.container.suspend(to: self.vmStateURL)
+            await self.setState(.stopped)
             return message.reply()
         }
     }

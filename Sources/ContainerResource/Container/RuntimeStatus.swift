@@ -26,6 +26,8 @@ public enum RuntimeStatus: String, CaseIterable, Sendable, Codable {
     case running
     /// The object is paused, its virtual machine frozen in memory.
     case paused
+    /// The object is suspended, its virtual machine state saved to disk.
+    case suspended
     /// The object is currently stopping.
     case stopping
 }

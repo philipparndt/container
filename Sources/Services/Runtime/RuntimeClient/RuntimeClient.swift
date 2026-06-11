@@ -221,6 +221,19 @@ extension RuntimeClient {
         }
     }
 
+    public func suspend() async throws {
+        let request = XPCMessage(route: RuntimeRoutes.suspend.rawValue)
+        do {
+            try await self.client.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to suspend container \(self.id)",
+                cause: error
+            )
+        }
+    }
+
     public func kill(_ id: String, signal: String) async throws {
         let request = XPCMessage(route: RuntimeRoutes.kill.rawValue)
         request.set(key: RuntimeKeys.id.rawValue, value: id)

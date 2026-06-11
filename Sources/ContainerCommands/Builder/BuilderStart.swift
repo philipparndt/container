@@ -207,6 +207,10 @@ extension Application {
                     // A paused builder holds its state; resume and reuse it.
                     try await client.resume(id: existingContainer.id)
                     return
+                case .suspended:
+                    // A suspended builder restores on start.
+                    try await startBuildKit(client: client, id: existingContainer.id, progressUpdate, nil)
+                    return
                 case .unknown:
                     break
                 }

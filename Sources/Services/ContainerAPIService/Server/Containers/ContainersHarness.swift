@@ -105,6 +105,18 @@ public struct ContainersHarness: Sendable {
     }
 
     @Sendable
+    public func suspend(_ message: XPCMessage) async throws -> XPCMessage {
+        guard let id = message.string(key: .id) else {
+            throw ContainerizationError(
+                .invalidArgument,
+                message: "id cannot be empty"
+            )
+        }
+        try await service.suspend(id: id)
+        return message.reply()
+    }
+
+    @Sendable
     public func dial(_ message: XPCMessage) async throws -> XPCMessage {
         let id = message.string(key: .id)
         guard let id else {

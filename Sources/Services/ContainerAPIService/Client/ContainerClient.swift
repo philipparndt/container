@@ -225,6 +225,22 @@ public struct ContainerClient: Sendable {
         }
     }
 
+    /// Suspend the container: save its virtual machine state to disk and
+    /// release CPU and memory. `start` continues it where it left off.
+    public func suspend(id: String) async throws {
+        do {
+            let request = XPCMessage(route: .containerSuspend)
+            request.set(key: .id, value: id)
+            try await xpcClient.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to suspend container",
+                cause: error
+            )
+        }
+    }
+
     /// Delete the container along with any resources.
     public func delete(id: String, force: Bool = false) async throws {
         do {

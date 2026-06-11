@@ -628,6 +628,23 @@ public actor ContainersService {
         }
     }
 
+    public func suspend(id: String) async throws {
+        let state = try self._getContainerState(id: id)
+        guard state.snapshot.status == .running else {
+            throw ContainerizationError(.invalidState, message: "container \(id) is not running")
+        }
+        let client = try state.getClient()
+        try await client.suspend()
+        // Tear down the runtime helper like a regular stop, then record
+        // the suspended state so start knows to restore.
+        try await handleContainerExit(id: id)
+        try await self.lock.withLock(logMetadata: ["acquirer": "\(#function)", "id": "\(id)"]) { context in
+            var state = try await self._getContainerState(id: id)
+            state.snapshot.status = .suspended
+            await self.setContainerState(id, state, context: context)
+        }
+    }
+
     public func stop(id: String, options: ContainerStopOptions) async throws {
         log.debug(
             "ContainersService: enter",
