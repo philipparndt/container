@@ -117,6 +117,25 @@ public struct ContainersHarness: Sendable {
     }
 
     @Sendable
+    public func memoryTarget(_ message: XPCMessage) async throws -> XPCMessage {
+        guard let id = message.string(key: .id) else {
+            throw ContainerizationError(
+                .invalidArgument,
+                message: "id cannot be empty"
+            )
+        }
+        let bytes = message.uint64(key: .memoryBytes)
+        guard bytes > 0 else {
+            throw ContainerizationError(
+                .invalidArgument,
+                message: "memory target must be positive"
+            )
+        }
+        try await service.setTargetMemory(id: id, bytes: bytes)
+        return message.reply()
+    }
+
+    @Sendable
     public func dial(_ message: XPCMessage) async throws -> XPCMessage {
         let id = message.string(key: .id)
         guard let id else {

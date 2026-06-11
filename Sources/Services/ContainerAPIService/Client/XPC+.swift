@@ -71,6 +71,9 @@ public enum XPCKeys: String {
     case apiServerBuild
     case apiServerAppName
 
+    /// Memory balloon target in bytes.
+    case memoryBytes
+
     /// Process request keys.
     case signal
     case snapshot
@@ -157,6 +160,7 @@ public enum XPCRoute: String {
     case containerPause
     case containerResume
     case containerSuspend
+    case containerMemoryTarget
     case containerDial
     case containerResize
     case containerKill

@@ -645,6 +645,16 @@ public actor ContainersService {
         }
     }
 
+    /// Set the memory balloon target of the container's virtual machine.
+    public func setTargetMemory(id: String, bytes: UInt64) async throws {
+        let state = try self._getContainerState(id: id)
+        guard state.snapshot.status == .running else {
+            throw ContainerizationError(.invalidState, message: "container \(id) is not running")
+        }
+        let client = try state.getClient()
+        try await client.setTargetMemory(bytes: bytes)
+    }
+
     public func stop(id: String, options: ContainerStopOptions) async throws {
         log.debug(
             "ContainersService: enter",

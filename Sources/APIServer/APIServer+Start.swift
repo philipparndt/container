@@ -300,6 +300,7 @@ extension APIServer {
             routes[XPCRoute.containerPause] = XPCServer.route(harness.pause)
             routes[XPCRoute.containerResume] = XPCServer.route(harness.resume)
             routes[XPCRoute.containerSuspend] = XPCServer.route(harness.suspend)
+            routes[XPCRoute.containerMemoryTarget] = XPCServer.route(harness.memoryTarget)
             routes[XPCRoute.containerStartProcess] = XPCServer.route(harness.startProcess)
             routes[XPCRoute.containerCreateProcess] = XPCServer.route(harness.createProcess)
             routes[XPCRoute.containerResize] = XPCServer.route(harness.resize)

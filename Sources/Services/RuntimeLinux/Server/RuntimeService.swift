@@ -279,6 +279,14 @@ public actor RuntimeService {
 
             let id = config.id
             let rootfs = try bundle.containerRootfs.asMount
+            // The restored virtual machine configuration must match the
+            // device set of the saved state: only attach the memory balloon
+            // when the state was saved with one (older states were not).
+            let restoring = FileManager.default.fileExists(atPath: self.vmStateURL.path)
+            var memoryBalloon = true
+            if restoring {
+                memoryBalloon = (try? JSONDecoder().decode(VMStateFeatures.self, from: Data(contentsOf: self.vmFeaturesURL)))?.memoryBalloon ?? false
+            }
             let container = try LinuxContainer(id, rootfs: rootfs, vmm: vmm, logger: self.log) { czConfig in
                 try Self.configureContainer(czConfig: &czConfig, config: config, dynamicEnv: dynamicEnv, log: self.log)
                 czConfig.interfaces = interfaces
@@ -299,6 +307,7 @@ public actor RuntimeService {
                 czConfig.hosts = Hosts(entries: hostsEntries)
                 czConfig.bootLog = BootLog.file(path: bundle.bootlog, append: true)
                 czConfig.machineIdentifier = try self.stableMachineIdentifier()
+                czConfig.memoryBalloon = memoryBalloon
             }
 
             let ctrInfo = ContainerInfo(
@@ -312,7 +321,6 @@ public actor RuntimeService {
             await self.setNetworkSessions(sessions)
 
             do {
-                let restoring = FileManager.default.fileExists(atPath: self.vmStateURL.path)
                 if restoring {
                     // The sandbox was suspended to disk: restore the virtual
                     // machine instead of booting it. The guest, including
@@ -320,6 +328,7 @@ public actor RuntimeService {
                     try await container.restore(from: self.vmStateURL)
                     try FileManager.default.removeItem(at: self.vmStateURL)
                     try? FileManager.default.removeItem(at: self.vmAttachmentsURL)
+                    try? FileManager.default.removeItem(at: self.vmFeaturesURL)
                 } else {
                     try await container.create()
                 }
@@ -614,6 +623,16 @@ public actor RuntimeService {
         self.root.appendingPathComponent("machine-identifier.bin")
     }
 
+    /// Device features the suspended machine state was saved with. The
+    /// restored virtual machine configuration must use the same device set.
+    private struct VMStateFeatures: Codable {
+        var memoryBalloon: Bool
+    }
+
+    private nonisolated var vmFeaturesURL: URL {
+        self.root.appendingPathComponent("vmstate-features.json")
+    }
+
     private nonisolated func stableMachineIdentifier() throws -> Data {
         if let data = try? Data(contentsOf: self.machineIdentifierURL) {
             return data
@@ -647,8 +666,36 @@ public actor RuntimeService {
             // next bootstrap reuses their MAC addresses.
             let attachmentData = try JSONEncoder().encode(ctr.attachments)
             try attachmentData.write(to: self.vmAttachmentsURL)
+            let features = VMStateFeatures(memoryBalloon: ctr.container.config.memoryBalloon)
+            try JSONEncoder().encode(features).write(to: self.vmFeaturesURL)
             try await ctr.container.suspend(to: self.vmStateURL)
             await self.setState(.stopped)
+            return message.reply()
+        }
+    }
+
+    /// Set the memory balloon target of the sandbox's virtual machine.
+    ///
+    /// - Parameters:
+    ///   - message: An XPC message with the following parameters:
+    ///     - memoryBytes: The balloon target in bytes.
+    ///
+    /// - Returns: An XPC message with no parameters.
+    @Sendable
+    public func memoryTarget(_ message: XPCMessage) async throws -> XPCMessage {
+        self.log.debug("enter", metadata: ["func": "\(#function)"])
+        defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
+
+        let bytes = message.uint64(key: RuntimeKeys.memoryBytes.rawValue)
+        guard bytes > 0 else {
+            throw ContainerizationError(.invalidArgument, message: "memory target must be positive")
+        }
+        return try await self.lock.withLock { _ in
+            guard case .running = await self.state else {
+                throw ContainerizationError(.invalidState, message: "sandbox is not running")
+            }
+            let ctr = try await self.getContainer()
+            try await ctr.container.setTargetMemory(bytes: bytes)
             return message.reply()
         }
     }

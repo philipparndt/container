@@ -241,6 +241,24 @@ public struct ContainerClient: Sendable {
         }
     }
 
+    /// Set the memory balloon target of the container's virtual machine.
+    /// Lowering the target lets the host reclaim memory the guest no longer
+    /// uses; the configured memory size restores normal operation.
+    public func setTargetMemory(id: String, bytes: UInt64) async throws {
+        do {
+            let request = XPCMessage(route: .containerMemoryTarget)
+            request.set(key: .id, value: id)
+            request.set(key: .memoryBytes, value: bytes)
+            try await xpcClient.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to set memory target for container",
+                cause: error
+            )
+        }
+    }
+
     /// Delete the container along with any resources.
     public func delete(id: String, force: Bool = false) async throws {
         do {

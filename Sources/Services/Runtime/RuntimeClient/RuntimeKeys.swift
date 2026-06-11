@@ -43,6 +43,9 @@ public enum RuntimeKeys: String {
     /// Container statistics
     case statistics
 
+    /// Memory balloon target in bytes
+    case memoryBytes
+
     /// Copy parameters
     case sourcePath
     case destinationPath
