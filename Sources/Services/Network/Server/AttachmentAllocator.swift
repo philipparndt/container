@@ -28,11 +28,23 @@ actor AttachmentAllocator {
         )
     }
 
-    /// Allocate a network address for a host.
-    func allocate(hostname: String) async throws -> UInt32 {
+    /// Allocate a network address for a host. A desired address is used
+    /// when it is still available (e.g. restoring a suspended container
+    /// whose saved state is bound to its previous address).
+    func allocate(hostname: String, desired: UInt32? = nil) async throws -> UInt32 {
         // Client is responsible for ensuring two containers don't use same hostname, so provide existing IP if hostname exists
         if let index = hostnames[hostname] {
             return index
+        }
+
+        if let desired {
+            do {
+                try allocator.reserve(desired)
+                hostnames[hostname] = desired
+                return desired
+            } catch {
+                // fall back to a fresh allocation
+            }
         }
 
         let index = try allocator.allocate()

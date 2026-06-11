@@ -19,6 +19,7 @@ public enum NetworkKeys: String {
     case attachment
     case hostname
     case macAddress
+    case desiredAddress
     case network
     case status
 }

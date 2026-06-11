@@ -200,12 +200,15 @@ public actor RuntimeService {
                     let session = client.connect()
                     sessions.append(session)
                     var macAddress = attachmentConfig.options.macAddress
+                    var desiredAddress: String?
                     if index < savedAttachments.count {
                         macAddress = savedAttachments[index].macAddress
+                        desiredAddress = savedAttachments[index].ipv4Address.address.description
                     }
                     var (attachment, additionalData) = try await client.allocate(
                         hostname: attachmentConfig.options.hostname,
                         macAddress: macAddress,
+                        desiredAddress: desiredAddress,
                         on: session
                     )
                     if let mtu = attachmentConfig.options.mtu {

@@ -57,6 +57,7 @@ public actor DefaultNetworkService: NetworkService {
     public func allocate(
         hostname: String,
         macAddress: MACAddress?,
+        desiredAddress: String? = nil,
         session: XPCServerSession
     ) async throws -> (attachment: Attachment, additionalData: XPCMessage?) {
         log.debug("enter", metadata: ["func": "\(#function)"])
@@ -67,7 +68,8 @@ public actor DefaultNetworkService: NetworkService {
         }
 
         let macAddress = macAddress ?? MACAddress((UInt64.random(in: 0...UInt64.max) & 0x0cff_ffff_ffff) | 0xf200_0000_0000)
-        let index = try await allocator.allocate(hostname: hostname)
+        let desired = desiredAddress.flatMap { try? IPv4Address($0).value }
+        let index = try await allocator.allocate(hostname: hostname, desired: desired)
         let ipv6Address = try status.ipv6Subnet
             .map { try CIDRv6(macAddress.ipv6Address(network: $0.lower), prefix: $0.prefix) }
         let ip = IPv4Address(index)
