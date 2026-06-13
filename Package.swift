@@ -375,7 +375,8 @@ let package = Package(
                 "ContainerVersion",
                 "ContainerXPC",
             ],
-            path: "Sources/Plugins/NetworkGvnet"
+            path: "Sources/Plugins/NetworkGvnet",
+            exclude: ["config.toml"]
         ),
         .target(
             name: "ContainerNetworkGvnetServer",

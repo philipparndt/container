@@ -1,0 +1,11 @@
+abstract = "transparent-egress (gvisor-tap-vsock) network management plugin"
+author = "container project authors"
+version = 0.1
+
+[servicesConfig]
+loadAtBoot = false
+runAtLoad = true
+defaultArguments = []
+
+[[servicesConfig.services]]
+type = "network"

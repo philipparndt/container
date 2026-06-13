@@ -395,6 +395,12 @@ public actor NetworksService {
             args += ["--variant", variant]
         }
 
+        // gvnet network: forward the per-VM userspace-netstack vfkit socket
+        // path to the plugin (it relays it to the runtime as additional data)
+        if let gvnetSocket = configuration.options["gvnetSocketPath"] {
+            args += ["--gvnet-socket", gvnetSocket]
+        }
+
         let entityPath = try store.entityPath(configuration.id)
         try pluginLoader.registerWithLaunchd(
             plugin: networkPlugin,
