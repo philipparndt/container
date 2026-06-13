@@ -42,8 +42,20 @@ extension NetworkGvnetHelper {
         @Option(name: .shortAndLong, help: "Network identifier")
         var id: String
 
+        @Option(name: .long, help: "Network mode")
+        var mode: String = NetworkMode.nat.rawValue
+
         @Option(name: .customLong("subnet"), help: "CIDR address for the IPv4 subnet")
         var ipv4Subnet: String?
+
+        // Accepted for parity with the generic network-plugin launch args the
+        // apiserver passes (vmnet declares these). gvnet is IPv4-only and has a
+        // single variant, so subnet-v6/variant are accepted and ignored.
+        @Option(name: .customLong("subnet-v6"), help: "CIDR address for the IPv6 prefix (ignored; gvnet is IPv4-only)")
+        var ipv6Subnet: String?
+
+        @Option(name: .long, help: "Variant of the network helper to use (accepted for compatibility; ignored)")
+        var variant: String?
 
         @Option(name: .customLong("gvnet-socket"), help: "vfkit unixgram socket path of this network's userspace netstack")
         var gvnetSocket: String
@@ -56,7 +68,7 @@ extension NetworkGvnetHelper {
                 let ipv4Subnet = try self.ipv4Subnet.map { try CIDRv4($0) }
                 let configuration = try NetworkConfiguration(
                     name: id,
-                    mode: .nat,
+                    mode: NetworkMode(rawValue: mode) ?? .nat,
                     ipv4Subnet: ipv4Subnet,
                     ipv6Subnet: nil,
                     plugin: commandName,

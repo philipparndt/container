@@ -52,7 +52,10 @@ public struct GvnetInterfaceStrategy: InterfaceStrategy {
             ipv4Address: attachment.ipv4Address,
             ipv4Gateway: ipv4Gateway,
             macAddress: attachment.macAddress,
-            mtu: attachment.mtu ?? 1500
+            // The gvnet network leaves mtu unset (0); the userspace netstack
+            // runs at 1500. VZ rejects any attachment MTU below 1500, and
+            // `?? 1500` only catches nil — not 0 — so clamp to the netstack MTU.
+            mtu: Swift.max(attachment.mtu ?? 1500, 1500)
         )
     }
 

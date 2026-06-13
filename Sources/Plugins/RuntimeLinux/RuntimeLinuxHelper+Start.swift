@@ -64,14 +64,21 @@ extension RuntimeLinuxHelper {
                 signal(SIGPIPE, SIG_IGN)
 
                 // FIXME: The network plugins that the runtime supports should be configurable elsewhere
+                // transparent-egress network backed by a userspace netstack
+                // (gvisor-tap-vsock) over a file-handle (vfkit) socket. The
+                // apiserver assigns the same variant it does for vmnet
+                // ("allocationOnly", or "reserved" on macOS 26) and nil as a
+                // fallback; the gvnet strategy is variant-agnostic (the netstack
+                // owns addressing/egress), so register it for all of them.
+                let gvnetStrategy = GvnetInterfaceStrategy(log: log)
                 var interfaceStrategies: [NetworkInterfaceKey: InterfaceStrategy] = [
                     NetworkInterfaceKey(plugin: "container-network-vmnet", variant: "allocationOnly"): IsolatedInterfaceStrategy(),
-                    // transparent-egress network backed by a userspace netstack
-                    // (gvisor-tap-vsock) over a file-handle (vfkit) socket
-                    NetworkInterfaceKey(plugin: "container-network-gvnet", variant: nil): GvnetInterfaceStrategy(log: log),
+                    NetworkInterfaceKey(plugin: "container-network-gvnet", variant: nil): gvnetStrategy,
+                    NetworkInterfaceKey(plugin: "container-network-gvnet", variant: "allocationOnly"): gvnetStrategy,
                 ]
                 if #available(macOS 26, *) {
                     interfaceStrategies[NetworkInterfaceKey(plugin: "container-network-vmnet", variant: "reserved")] = NonisolatedInterfaceStrategy(log: log)
+                    interfaceStrategies[NetworkInterfaceKey(plugin: "container-network-gvnet", variant: "reserved")] = gvnetStrategy
                 }
 
                 log.info("configuring XPC server")
