@@ -361,6 +361,33 @@ let package = Package(
             path: "Sources/Plugins/NetworkVmnet",
             exclude: ["config.toml"]
         ),
+        .executableTarget(
+            name: "container-network-gvnet",
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "ContainerizationExtras", package: "containerization"),
+                "ContainerLog",
+                "ContainerNetworkClient",
+                "ContainerNetworkServer",
+                "ContainerNetworkGvnetServer",
+                "ContainerResource",
+                "ContainerVersion",
+                "ContainerXPC",
+            ],
+            path: "Sources/Plugins/NetworkGvnet"
+        ),
+        .target(
+            name: "ContainerNetworkGvnetServer",
+            dependencies: [
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "ContainerizationExtras", package: "containerization"),
+                "ContainerNetworkServer",
+                "ContainerResource",
+                "ContainerXPC",
+            ],
+            path: "Sources/Services/NetworkGvnet/Server"
+        ),
         .target(
             name: "ContainerNetworkClient",
             dependencies: [
