@@ -65,7 +65,10 @@ extension RuntimeLinuxHelper {
 
                 // FIXME: The network plugins that the runtime supports should be configurable elsewhere
                 var interfaceStrategies: [NetworkInterfaceKey: InterfaceStrategy] = [
-                    NetworkInterfaceKey(plugin: "container-network-vmnet", variant: "allocationOnly"): IsolatedInterfaceStrategy()
+                    NetworkInterfaceKey(plugin: "container-network-vmnet", variant: "allocationOnly"): IsolatedInterfaceStrategy(),
+                    // transparent-egress network backed by a userspace netstack
+                    // (gvisor-tap-vsock) over a file-handle (vfkit) socket
+                    NetworkInterfaceKey(plugin: "container-network-gvnet", variant: nil): GvnetInterfaceStrategy(log: log),
                 ]
                 if #available(macOS 26, *) {
                     interfaceStrategies[NetworkInterfaceKey(plugin: "container-network-vmnet", variant: "reserved")] = NonisolatedInterfaceStrategy(log: log)
