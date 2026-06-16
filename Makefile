@@ -124,6 +124,16 @@ install: installer-pkg
 		$(SUDO) installer -pkg $(PKG_PATH) -target / ; \
 	fi
 
+# stage assembles the full install tree (container binaries + every plugin with
+# its config.toml) into $(STAGING_DIR), without building the signed installer
+# pkg. Bundlers (e.g. k3c) copy bin/ and libexec/ from here, so no plugin is
+# ever silently omitted — unlike copying a hand-populated ./libexec.
+.PHONY: stage clean-stage
+clean-stage:
+	@rm -rf "$(STAGING_DIR)"
+stage: build clean-stage $(STAGING_DIR)
+	@echo "staged install tree: $(STAGING_DIR)"
+
 $(STAGING_DIR):
 	@echo Installing container binaries from "$(BUILD_BIN_DIR)" into "$(STAGING_DIR)"...
 	@rm -rf "$(STAGING_DIR)"
