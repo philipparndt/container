@@ -128,11 +128,27 @@ install: installer-pkg
 # its config.toml) into $(STAGING_DIR), without building the signed installer
 # pkg. Bundlers (e.g. k3c) copy bin/ and libexec/ from here, so no plugin is
 # ever silently omitted — unlike copying a hand-populated ./libexec.
-.PHONY: stage clean-stage
+.PHONY: stage clean-stage codesign-staging
 clean-stage:
 	@rm -rf "$(STAGING_DIR)"
-stage: build clean-stage $(STAGING_DIR)
+stage: build clean-stage codesign-staging
 	@echo "staged install tree: $(STAGING_DIR)"
+
+# Codesign the staged binaries in place, with the virtualization entitlement on
+# the plugins that touch Virtualization.framework (runtime-linux, vmnet, gvnet).
+# Both `stage` and `installer-pkg` depend on this: bundlers (e.g. k3c) consume
+# the staged tree directly, so without signing here the plugins ship with no
+# entitlements and the apiserver hangs at startup when they fail to launch.
+codesign-staging: $(STAGING_DIR)
+	@echo Signing container binaries...
+	@codesign $(CODESIGN_OPTS) --identifier com.apple.container.cli "$(join $(STAGING_DIR), bin/container)"
+	@codesign $(CODESIGN_OPTS) --identifier com.apple.container.apiserver "$(join $(STAGING_DIR), bin/container-apiserver)"
+	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. "$(join $(STAGING_DIR), libexec/container/plugins/container-core-images/bin/container-core-images)"
+	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. --entitlements=signing/container-runtime-linux.entitlements "$(join $(STAGING_DIR), libexec/container/plugins/container-runtime-linux/bin/container-runtime-linux)"
+	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. --entitlements=signing/container-network-vmnet.entitlements "$(join $(STAGING_DIR), libexec/container/plugins/container-network-vmnet/bin/container-network-vmnet)"
+	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. --entitlements=signing/container-network-gvnet.entitlements "$(join $(STAGING_DIR), libexec/container/plugins/container-network-gvnet/bin/container-network-gvnet)"
+	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. "$(join $(STAGING_DIR), libexec/container/plugins/machine-apiserver/bin/machine-apiserver)"
+	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. "$(join $(STAGING_DIR), libexec/container/plugins/k8s/bin/k8s)"
 
 $(STAGING_DIR):
 	@echo Installing container binaries from "$(BUILD_BIN_DIR)" into "$(STAGING_DIR)"...
@@ -171,17 +187,7 @@ $(STAGING_DIR):
 	@install scripts/uninstall-container.sh "$(join $(STAGING_DIR), bin/uninstall-container.sh)"
 
 .PHONY: installer-pkg
-installer-pkg: $(STAGING_DIR)
-	@echo Signing container binaries...
-	@codesign $(CODESIGN_OPTS) --identifier com.apple.container.cli "$(join $(STAGING_DIR), bin/container)"
-	@codesign $(CODESIGN_OPTS) --identifier com.apple.container.apiserver "$(join $(STAGING_DIR), bin/container-apiserver)"
-	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. "$(join $(STAGING_DIR), libexec/container/plugins/container-core-images/bin/container-core-images)"
-	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. --entitlements=signing/container-runtime-linux.entitlements "$(join $(STAGING_DIR), libexec/container/plugins/container-runtime-linux/bin/container-runtime-linux)"
-	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. --entitlements=signing/container-network-vmnet.entitlements "$(join $(STAGING_DIR), libexec/container/plugins/container-network-vmnet/bin/container-network-vmnet)"
-	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. --entitlements=signing/container-network-gvnet.entitlements "$(join $(STAGING_DIR), libexec/container/plugins/container-network-gvnet/bin/container-network-gvnet)"
-	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. "$(join $(STAGING_DIR), libexec/container/plugins/machine-apiserver/bin/machine-apiserver)"
-	@codesign $(CODESIGN_OPTS) --prefix=com.apple.container. "$(join $(STAGING_DIR), libexec/container/plugins/k8s/bin/k8s)"
-
+installer-pkg: codesign-staging
 	@echo Creating application installer
 	@pkgbuild --root "$(STAGING_DIR)" --identifier com.apple.container-installer --install-location /usr/local --version ${RELEASE_VERSION} $(PKG_PATH)
 	@rm -rf "$(STAGING_DIR)"
