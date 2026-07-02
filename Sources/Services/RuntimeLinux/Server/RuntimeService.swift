@@ -53,6 +53,11 @@ public actor RuntimeService {
     private var socketForwarders: [SocketForwarderResult] = []
     private var networkSessions: [XPCClientSession] = []
     private var autoBalloon: AutoBalloonController?
+    /// The last explicitly set balloon target, so a re-armed automatic
+    /// policy starts from the real balloon state instead of assuming an
+    /// empty balloon (which would misread balloon pages as workload and
+    /// pin the target at the configured memory).
+    private var lastMemoryTarget: UInt64?
 
     private static let sshAuthSocketGuestPath = "/var/host-services/ssh-auth.sock"
     private static let sshAuthSocketEnvVar = "SSH_AUTH_SOCK"
@@ -717,6 +722,7 @@ public actor RuntimeService {
                 self.log.info("memory target set manually; auto memory policy paused")
             }
             try await ctr.container.setTargetMemory(bytes: bytes)
+            await self.setLastMemoryTarget(bytes)
             return message.reply()
         }
     }
@@ -749,10 +755,22 @@ public actor RuntimeService {
                 guard ctr.container.config.memoryBalloon else {
                     throw ContainerizationError(.unsupported, message: "sandbox has no memory balloon device")
                 }
+                // Start from the balloon's known target when there is one; an
+                // unknown balloon state (e.g. re-arming after manual targets
+                // on an older helper) is resolved with a full recycle.
+                var knownTarget = await self.autoBalloon?.currentTarget
+                if knownTarget == nil {
+                    knownTarget = await self.lastMemoryTarget
+                }
                 await self.stopAutoBalloon()
                 var config = ctr.config
                 config.resources.memoryPolicy = policy
-                await self.startAutoBalloon(container: ctr.container, config: config, recycle: false)
+                await self.startAutoBalloon(
+                    container: ctr.container,
+                    config: config,
+                    recycle: knownTarget == nil,
+                    initialTarget: knownTarget
+                )
             case .manual:
                 await self.stopAutoBalloon()
             }
@@ -795,18 +813,22 @@ public actor RuntimeService {
     }
 
     /// Start the automatic balloon controller for the sandbox.
-    private func startAutoBalloon(container: LinuxContainer, config: ContainerConfiguration, recycle: Bool) async {
+    private func startAutoBalloon(container: LinuxContainer, config: ContainerConfiguration, recycle: Bool, initialTarget: UInt64? = nil) async {
         let controller = AutoBalloonController(
             container: container,
             policy: .init(
                 configuredMemory: config.resources.memoryInBytes,
                 settings: config.resources.memoryPolicy
             ),
-            initialTarget: nil,
+            initialTarget: initialTarget,
             logger: self.log
         )
         self.autoBalloon = controller
         await controller.start(recycle: recycle)
+    }
+
+    private func setLastMemoryTarget(_ bytes: UInt64?) {
+        self.lastMemoryTarget = bytes
     }
 
     /// Stop the automatic balloon controller, if running.
@@ -834,7 +856,10 @@ public actor RuntimeService {
             let ctr = try await self.getContainer()
             // The controller's guest readings cannot survive a pause
             // (vsock connections die with the frozen guest); stop it and
-            // restart on resume.
+            // restart on resume, from the target the balloon keeps.
+            if let target = await self.autoBalloon?.currentTarget {
+                await self.setLastMemoryTarget(target)
+            }
             await self.stopAutoBalloon()
             try await ctr.container.pause()
             await self.setState(.paused)
@@ -861,7 +886,12 @@ public actor RuntimeService {
             try await ctr.container.resume()
             await self.setState(.running)
             if ctr.config.resources.memoryPolicy?.mode == .auto, ctr.container.config.memoryBalloon {
-                await self.startAutoBalloon(container: ctr.container, config: ctr.config, recycle: false)
+                await self.startAutoBalloon(
+                    container: ctr.container,
+                    config: ctr.config,
+                    recycle: false,
+                    initialTarget: await self.lastMemoryTarget
+                )
             }
             return message.reply()
         }
