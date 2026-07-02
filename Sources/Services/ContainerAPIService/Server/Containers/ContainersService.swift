@@ -89,6 +89,63 @@ public actor ContainersService {
         self.networksService = service
     }
 
+    /// Adopt containers whose runtime helpers are still alive. The helpers
+    /// are per-container launchd services independent of the apiserver, so
+    /// running containers survive an apiserver restart — but loadAtBoot
+    /// reports every container stopped, which would strand the live ones
+    /// (exec, stop, suspend all fail on a "stopped" container) until they
+    /// are deleted. Probe each helper and take running or paused containers
+    /// back over, restoring the client, status, networks, and exit
+    /// monitoring. Call once at startup, before serving requests.
+    public func adoptRunningContainers() async {
+        for (id, state) in self.containers where state.snapshot.status == .stopped {
+            var state = state
+            let runtime = state.snapshot.configuration.runtimeHandler
+            do {
+                let client = try await RuntimeClient.create(id: id, runtime: runtime, timeout: .seconds(2))
+                let sandbox = try await client.state()
+                switch sandbox.status {
+                case .running, .paused:
+                    break
+                default:
+                    continue
+                }
+                try await self.exitMonitor.registerProcess(id: id, onExit: self.handleContainerExit)
+                let log = self.log
+                let waitFunc: ExitMonitor.WaitHandler = {
+                    let code = try await client.wait(id)
+                    log.info(
+                        "adopted container finished in exit monitor",
+                        metadata: [
+                            "id": "\(id)",
+                            "rc": "\(code)",
+                        ])
+                    return code
+                }
+                try await self.exitMonitor.track(id: id, waitingOn: waitFunc)
+                state.client = client
+                state.snapshot.status = sandbox.status
+                state.snapshot.networks = sandbox.networks
+                state.snapshot.startedDate = Date()
+                self.containers[id] = state
+                self.log.info(
+                    "adopted running container",
+                    metadata: [
+                        "id": "\(id)",
+                        "status": "\(sandbox.status)",
+                    ])
+            } catch {
+                // No live runtime helper: the container is genuinely stopped.
+                self.log.debug(
+                    "container not adopted",
+                    metadata: [
+                        "id": "\(id)",
+                        "error": "\(error)",
+                    ])
+            }
+        }
+    }
+
     static func loadAtBoot(root: URL, loader: PluginLoader, log: Logger) throws -> [String: ContainerState] {
         var directories = try FileManager.default.contentsOfDirectory(
             at: root,

@@ -78,6 +78,10 @@ extension APIServer {
                     routes: &routes
                 )
                 await containersService.setNetworksService(networkService)
+                // Containers survive an apiserver restart (their runtime
+                // helpers are independent launchd services): take running
+                // ones back over before serving requests.
+                await containersService.adoptRunningContainers()
                 initializeHealthCheckService(log: log, routes: &routes)
                 try initializeKernelService(log: log, routes: &routes)
                 let volumesService = try await initializeVolumeService(containersService: containersService, log: log, routes: &routes)
