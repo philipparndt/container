@@ -259,6 +259,46 @@ public struct ContainerClient: Sendable {
         }
     }
 
+    /// Change the memory policy of the container's virtual machine. Auto
+    /// sizes the memory balloon continuously to the guest's workload,
+    /// returning unused memory to the host; manual stops the automatic
+    /// sizing, leaving the balloon at its current target.
+    public func setMemoryPolicy(id: String, policy: ContainerConfiguration.MemoryPolicy) async throws {
+        do {
+            let request = XPCMessage(route: .containerMemoryPolicy)
+            request.set(key: .id, value: id)
+            let data = try JSONEncoder().encode(policy)
+            request.set(key: .memoryPolicy, value: data)
+            try await xpcClient.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to set memory policy for container",
+                cause: error
+            )
+        }
+    }
+
+    /// Report the memory state of the container's virtual machine: the
+    /// active policy, balloon target, and guest memory numbers.
+    public func memoryStatus(id: String) async throws -> MemoryStatus {
+        do {
+            let request = XPCMessage(route: .containerMemoryStatus)
+            request.set(key: .id, value: id)
+            let reply = try await xpcClient.send(request)
+            guard let data = reply.dataNoCopy(key: .memoryStatus) else {
+                throw ContainerizationError(.internalError, message: "empty memory status reply")
+            }
+            return try JSONDecoder().decode(MemoryStatus.self, from: data)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to get memory status for container",
+                cause: error
+            )
+        }
+    }
+
     /// Delete the container along with any resources.
     public func delete(id: String, force: Bool = false) async throws {
         do {

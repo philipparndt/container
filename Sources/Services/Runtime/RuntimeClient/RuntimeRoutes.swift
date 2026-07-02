@@ -37,6 +37,10 @@ public enum RuntimeRoutes: String {
     case suspend = "com.apple.container.runtime/suspend"
     /// Set the memory balloon target of the sandbox's virtual machine.
     case memoryTarget = "com.apple.container.runtime/memoryTarget"
+    /// Change the memory policy (auto/manual balloon sizing) of the sandbox.
+    case memoryPolicy = "com.apple.container.runtime/memoryPolicy"
+    /// Report the sandbox's memory state (policy, target, guest numbers).
+    case memoryStatus = "com.apple.container.runtime/memoryStatus"
     /// Return the current state of the sandbox.
     case state = "com.apple.container.runtime/state"
     /// Get resource usage statistics for the sandbox.

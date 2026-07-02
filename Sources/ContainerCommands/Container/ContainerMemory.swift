@@ -17,6 +17,7 @@
 import ArgumentParser
 import ContainerAPIClient
 import ContainerPersistence
+import ContainerResource
 import ContainerizationError
 import Foundation
 import Logging
@@ -29,7 +30,9 @@ extension Application {
             commandName: "memory",
             abstract: "Manage the memory of a running container",
             subcommands: [
-                MemoryTarget.self
+                MemoryTarget.self,
+                MemoryPolicy.self,
+                MemoryStatus.self,
             ]
         )
 
@@ -60,6 +63,76 @@ extension Application {
                 let client = ContainerClient()
                 try await client.setTargetMemory(id: containerId, bytes: bytes)
                 print(containerId)
+            }
+        }
+
+        public struct MemoryPolicy: AsyncLoggableCommand {
+            public init() {}
+
+            public static let configuration = CommandConfiguration(
+                commandName: "policy",
+                abstract: "Set the memory policy of a container's virtual machine; auto sizes the memory "
+                    + "balloon continuously to the guest's workload, returning unused memory to the host"
+            )
+
+            @OptionGroup
+            public var logOptions: Flags.Logging
+
+            @Argument(help: "Container ID")
+            public var containerId: String
+
+            @Argument(help: "Memory policy (auto or manual)")
+            public var mode: String
+
+            @Option(name: .customLong("min"), help: "Floor for the balloon target in auto mode (e.g. 1g)")
+            public var minSize: String?
+
+            @Option(name: .customLong("headroom"), help: "Memory kept available above the workload in auto mode (e.g. 1g)")
+            public var headroomSize: String?
+
+            public mutating func run() async throws {
+                guard let mode = ContainerConfiguration.MemoryPolicy.Mode(rawValue: mode) else {
+                    throw ContainerizationError(.invalidArgument, message: "invalid memory policy \(mode); use auto or manual")
+                }
+                var policy = ContainerConfiguration.MemoryPolicy(mode: mode)
+                if let minSize {
+                    policy.minBytes = UInt64(try Measurement.parse(parsing: minSize).converted(to: .bytes).value)
+                }
+                if let headroomSize {
+                    policy.headroomBytes = UInt64(try Measurement.parse(parsing: headroomSize).converted(to: .bytes).value)
+                }
+                let client = ContainerClient()
+                try await client.setMemoryPolicy(id: containerId, policy: policy)
+                print(containerId)
+            }
+        }
+
+        public struct MemoryStatus: AsyncLoggableCommand {
+            public init() {}
+
+            public static let configuration = CommandConfiguration(
+                commandName: "status",
+                abstract: "Show the memory state of a container's virtual machine: "
+                    + "policy, balloon target, and guest memory"
+            )
+
+            @OptionGroup
+            public var logOptions: Flags.Logging
+
+            @Argument(help: "Container ID")
+            public var containerId: String
+
+            public mutating func run() async throws {
+                let client = ContainerClient()
+                let status = try await client.memoryStatus(id: containerId)
+                let mib = { (bytes: UInt64) in "\(bytes / (1024 * 1024))M" }
+                print("policy: \(status.policyMode.rawValue)")
+                if let target = status.targetBytes {
+                    print("target: \(mib(target))")
+                }
+                print("guest total: \(mib(status.guestTotalBytes))")
+                print("guest free: \(mib(status.guestFreeBytes))")
+                print("guest available: \(mib(status.guestAvailableBytes))")
             }
         }
     }

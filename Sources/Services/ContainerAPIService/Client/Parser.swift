@@ -105,6 +105,9 @@ public struct Parser {
     public static func resources(
         cpus: Int64?,
         memory: String?,
+        memoryPolicy: String? = nil,
+        memoryMin: String? = nil,
+        memoryHeadroom: String? = nil,
         defaultCPUs: Int,
         defaultMemory: MemorySize,
     ) throws -> ContainerConfiguration.Resources {
@@ -118,6 +121,20 @@ public struct Parser {
 
         if let memory {
             resource.memoryInBytes = try Parser.memoryStringAsMiB(memory).mib()
+        }
+
+        if let memoryPolicy {
+            guard let mode = ContainerConfiguration.MemoryPolicy.Mode(rawValue: memoryPolicy) else {
+                throw ContainerizationError(.invalidArgument, message: "invalid memory policy \(memoryPolicy); use auto or manual")
+            }
+            var policy = ContainerConfiguration.MemoryPolicy(mode: mode)
+            if let memoryMin {
+                policy.minBytes = try Parser.memoryStringAsMiB(memoryMin).mib()
+            }
+            if let memoryHeadroom {
+                policy.headroomBytes = try Parser.memoryStringAsMiB(memoryHeadroom).mib()
+            }
+            resource.memoryPolicy = policy
         }
 
         return resource

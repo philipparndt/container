@@ -136,6 +136,40 @@ public struct ContainersHarness: Sendable {
     }
 
     @Sendable
+    public func memoryPolicy(_ message: XPCMessage) async throws -> XPCMessage {
+        guard let id = message.string(key: .id) else {
+            throw ContainerizationError(
+                .invalidArgument,
+                message: "id cannot be empty"
+            )
+        }
+        guard let data = message.dataNoCopy(key: .memoryPolicy) else {
+            throw ContainerizationError(
+                .invalidArgument,
+                message: "memory policy cannot be empty"
+            )
+        }
+        let policy = try JSONDecoder().decode(ContainerConfiguration.MemoryPolicy.self, from: data)
+        try await service.setMemoryPolicy(id: id, policy: policy)
+        return message.reply()
+    }
+
+    @Sendable
+    public func memoryStatus(_ message: XPCMessage) async throws -> XPCMessage {
+        guard let id = message.string(key: .id) else {
+            throw ContainerizationError(
+                .invalidArgument,
+                message: "id cannot be empty"
+            )
+        }
+        let status = try await service.memoryStatus(id: id)
+        let reply = message.reply()
+        let data = try JSONEncoder().encode(status)
+        reply.set(key: .memoryStatus, value: data)
+        return reply
+    }
+
+    @Sendable
     public func dial(_ message: XPCMessage) async throws -> XPCMessage {
         let id = message.string(key: .id)
         guard let id else {

@@ -101,9 +101,12 @@ public struct Flags {
     public struct Resource: ParsableArguments {
         public init() {}
 
-        public init(cpus: Int64?, memory: String?) {
+        public init(cpus: Int64?, memory: String?, memoryPolicy: String? = nil, memoryMin: String? = nil, memoryHeadroom: String? = nil) {
             self.cpus = cpus
             self.memory = memory
+            self.memoryPolicy = memoryPolicy
+            self.memoryMin = memoryMin
+            self.memoryHeadroom = memoryHeadroom
         }
 
         @Option(name: .shortAndLong, help: "Number of CPUs to allocate to the container")
@@ -114,6 +117,24 @@ public struct Flags {
             help: "Amount of memory (1MiByte granularity), with optional K, M, G, T, or P suffix"
         )
         public var memory: String?
+
+        @Option(
+            name: .customLong("memory-policy"),
+            help: "Memory policy (auto or manual); auto sizes the memory balloon continuously to the guest's workload, returning unused memory to the host"
+        )
+        public var memoryPolicy: String?
+
+        @Option(
+            name: .customLong("memory-min"),
+            help: "Floor for the balloon target with --memory-policy auto (e.g. 1g)"
+        )
+        public var memoryMin: String?
+
+        @Option(
+            name: .customLong("memory-headroom"),
+            help: "Memory kept available above the workload with --memory-policy auto (e.g. 1g)"
+        )
+        public var memoryHeadroom: String?
     }
 
     public struct DNS: ParsableArguments {

@@ -74,6 +74,12 @@ public enum XPCKeys: String {
     /// Memory balloon target in bytes.
     case memoryBytes
 
+    /// JSON-encoded memory policy.
+    case memoryPolicy
+
+    /// JSON-encoded memory status.
+    case memoryStatus
+
     /// Process request keys.
     case signal
     case snapshot
@@ -161,6 +167,8 @@ public enum XPCRoute: String {
     case containerResume
     case containerSuspend
     case containerMemoryTarget
+    case containerMemoryPolicy
+    case containerMemoryStatus
     case containerDial
     case containerResize
     case containerKill

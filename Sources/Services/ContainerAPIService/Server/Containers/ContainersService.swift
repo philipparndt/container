@@ -655,6 +655,27 @@ public actor ContainersService {
         try await client.setTargetMemory(bytes: bytes)
     }
 
+    /// Change the memory policy (auto/manual balloon sizing) of the
+    /// container's virtual machine.
+    public func setMemoryPolicy(id: String, policy: ContainerConfiguration.MemoryPolicy) async throws {
+        let state = try self._getContainerState(id: id)
+        guard state.snapshot.status == .running else {
+            throw ContainerizationError(.invalidState, message: "container \(id) is not running")
+        }
+        let client = try state.getClient()
+        try await client.setMemoryPolicy(policy)
+    }
+
+    /// Report the memory state of the container's virtual machine.
+    public func memoryStatus(id: String) async throws -> MemoryStatus {
+        let state = try self._getContainerState(id: id)
+        guard state.snapshot.status == .running else {
+            throw ContainerizationError(.invalidState, message: "container \(id) is not running")
+        }
+        let client = try state.getClient()
+        return try await client.memoryStatus()
+    }
+
     public func stop(id: String, options: ContainerStopOptions) async throws {
         log.debug(
             "ContainersService: enter",

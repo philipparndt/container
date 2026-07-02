@@ -160,6 +160,31 @@ public struct ContainerConfiguration: Sendable, Codable {
         }
     }
 
+    /// How the memory balloon of a container's virtual machine is managed.
+    public struct MemoryPolicy: Sendable, Codable, Equatable {
+        public enum Mode: String, Sendable, Codable {
+            /// The balloon target only changes explicitly (memory target).
+            case manual
+            /// The runtime sizes the balloon continuously: the target follows
+            /// the guest workload plus headroom, returning unused memory to
+            /// the host and deflating promptly under guest memory pressure.
+            case auto
+        }
+
+        public var mode: Mode = .manual
+        /// Floor for the balloon target in auto mode. Defaults to 1 GiB.
+        public var minBytes: UInt64?
+        /// Memory kept available for the guest above its workload in auto
+        /// mode. Defaults to 1 GiB.
+        public var headroomBytes: UInt64?
+
+        public init(mode: Mode = .manual, minBytes: UInt64? = nil, headroomBytes: UInt64? = nil) {
+            self.mode = mode
+            self.minBytes = minBytes
+            self.headroomBytes = headroomBytes
+        }
+    }
+
     /// Resources like cpu, memory, and storage quota.
     public struct Resources: Sendable, Codable {
         /// Number of CPU cores allocated.
@@ -170,6 +195,8 @@ public struct ContainerConfiguration: Sendable, Codable {
         public var storage: UInt64?
         /// Additional CPU cores allocated for VM overhead (guest agent, etc).
         public var cpuOverhead: Int = 1
+        /// Runtime memory management policy. Nil means manual.
+        public var memoryPolicy: MemoryPolicy?
 
         public init() {}
 
@@ -179,6 +206,7 @@ public struct ContainerConfiguration: Sendable, Codable {
             self.memoryInBytes = try c.decodeIfPresent(UInt64.self, forKey: .memoryInBytes) ?? 1024.mib()
             self.storage = try c.decodeIfPresent(UInt64.self, forKey: .storage)
             self.cpuOverhead = try c.decodeIfPresent(Int.self, forKey: .cpuOverhead) ?? 1
+            self.memoryPolicy = try c.decodeIfPresent(MemoryPolicy.self, forKey: .memoryPolicy)
         }
     }
 

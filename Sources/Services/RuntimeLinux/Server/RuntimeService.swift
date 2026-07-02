@@ -52,6 +52,7 @@ public actor RuntimeService {
     private var processes: [String: ProcessInfo] = [:]
     private var socketForwarders: [SocketForwarderResult] = []
     private var networkSessions: [XPCClientSession] = []
+    private var autoBalloon: AutoBalloonController?
 
     private static let sshAuthSocketGuestPath = "/var/host-services/ssh-auth.sock"
     private static let sshAuthSocketEnvVar = "SSH_AUTH_SOCK"
@@ -339,6 +340,16 @@ public actor RuntimeService {
                     try await self.startSocketForwarders(attachment: attachments[0], publishedPorts: config.publishedPorts)
                 }
                 await self.setState(restoring ? .running : .booted)
+                // Continuous memory management: size the balloon to the
+                // guest's workload. A restored machine needs one full
+                // deflate + re-inflate cycle before the host frees pages.
+                if config.resources.memoryPolicy?.mode == .auto, memoryBalloon {
+                    await self.startAutoBalloon(
+                        container: container,
+                        config: config,
+                        recycle: restoring
+                    )
+                }
             } catch {
                 do {
                     try await self.cleanUpContainer(containerInfo: ctrInfo)
@@ -660,6 +671,10 @@ public actor RuntimeService {
                 throw ContainerizationError(.invalidState, message: "sandbox is not running")
             }
             let ctr = try await self.getContainer()
+            // Stop the balloon controller but keep the balloon inflated:
+            // ballooned pages are not part of the saved state, so the
+            // suspended image stays small. The next bootstrap recycles.
+            await self.stopAutoBalloon()
             await self.stopSocketForwarders()
             // The restored virtual machine configuration must be identical
             // to the suspended one: persist the network attachments so the
@@ -695,9 +710,110 @@ public actor RuntimeService {
                 throw ContainerizationError(.invalidState, message: "sandbox is not running")
             }
             let ctr = try await self.getContainer()
+            // An explicit target is a manual override: stop the automatic
+            // controller so it does not immediately re-size the balloon.
+            if await self.autoBalloon != nil {
+                await self.stopAutoBalloon()
+                self.log.info("memory target set manually; auto memory policy paused")
+            }
             try await ctr.container.setTargetMemory(bytes: bytes)
             return message.reply()
         }
+    }
+
+    /// Change the memory policy of the running sandbox. Auto starts the
+    /// balloon controller (sizing the balloon to the guest's workload);
+    /// manual stops it, leaving the balloon at its current target.
+    ///
+    /// - Parameters:
+    ///   - message: An XPC message with the following parameters:
+    ///     - memoryPolicy: The JSON-encoded memory policy.
+    ///
+    /// - Returns: An XPC message with no parameters.
+    @Sendable
+    public func memoryPolicy(_ message: XPCMessage) async throws -> XPCMessage {
+        self.log.debug("enter", metadata: ["func": "\(#function)"])
+        defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
+
+        guard let data = message.dataNoCopy(key: RuntimeKeys.memoryPolicy.rawValue) else {
+            throw ContainerizationError(.invalidArgument, message: "empty memory policy")
+        }
+        let policy = try JSONDecoder().decode(ContainerConfiguration.MemoryPolicy.self, from: data)
+        return try await self.lock.withLock { _ in
+            guard case .running = await self.state else {
+                throw ContainerizationError(.invalidState, message: "sandbox is not running")
+            }
+            let ctr = try await self.getContainer()
+            switch policy.mode {
+            case .auto:
+                guard ctr.container.config.memoryBalloon else {
+                    throw ContainerizationError(.unsupported, message: "sandbox has no memory balloon device")
+                }
+                await self.stopAutoBalloon()
+                var config = ctr.config
+                config.resources.memoryPolicy = policy
+                await self.startAutoBalloon(container: ctr.container, config: config, recycle: false)
+            case .manual:
+                await self.stopAutoBalloon()
+            }
+            return message.reply()
+        }
+    }
+
+    /// Report the sandbox's memory state: policy mode, balloon target, and
+    /// the guest kernel's whole-VM memory numbers.
+    ///
+    /// - Parameters:
+    ///   - message: An XPC message with no parameters.
+    ///
+    /// - Returns: An XPC message with the following parameters:
+    ///   - memoryStatus: The JSON-encoded memory status.
+    @Sendable
+    public func memoryStatus(_ message: XPCMessage) async throws -> XPCMessage {
+        self.log.debug("enter", metadata: ["func": "\(#function)"])
+        defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
+
+        return try await self.lock.withLock { _ in
+            guard case .running = await self.state else {
+                throw ContainerizationError(.invalidState, message: "sandbox is not running")
+            }
+            let ctr = try await self.getContainer()
+            let info = try await ctr.container.guestMemoryInfo()
+            let controller = await self.autoBalloon
+            let status = MemoryStatus(
+                policyMode: controller == nil ? .manual : .auto,
+                targetBytes: await controller?.currentTarget,
+                guestTotalBytes: info.totalBytes,
+                guestFreeBytes: info.freeBytes,
+                guestAvailableBytes: info.availableBytes
+            )
+            let reply = message.reply()
+            let data = try JSONEncoder().encode(status)
+            reply.set(key: RuntimeKeys.memoryStatus.rawValue, value: data)
+            return reply
+        }
+    }
+
+    /// Start the automatic balloon controller for the sandbox.
+    private func startAutoBalloon(container: LinuxContainer, config: ContainerConfiguration, recycle: Bool) async {
+        let controller = AutoBalloonController(
+            container: container,
+            policy: .init(
+                configuredMemory: config.resources.memoryInBytes,
+                settings: config.resources.memoryPolicy
+            ),
+            initialTarget: nil,
+            logger: self.log
+        )
+        self.autoBalloon = controller
+        await controller.start(recycle: recycle)
+    }
+
+    /// Stop the automatic balloon controller, if running.
+    private func stopAutoBalloon() async {
+        guard let controller = self.autoBalloon else { return }
+        await controller.stop()
+        self.autoBalloon = nil
     }
 
     /// Pause the sandbox virtual machine, freezing the guest in memory.
@@ -716,6 +832,10 @@ public actor RuntimeService {
                 throw ContainerizationError(.invalidState, message: "sandbox is not running")
             }
             let ctr = try await self.getContainer()
+            // The controller's guest readings cannot survive a pause
+            // (vsock connections die with the frozen guest); stop it and
+            // restart on resume.
+            await self.stopAutoBalloon()
             try await ctr.container.pause()
             await self.setState(.paused)
             return message.reply()
@@ -740,6 +860,9 @@ public actor RuntimeService {
             let ctr = try await self.getContainer()
             try await ctr.container.resume()
             await self.setState(.running)
+            if ctr.config.resources.memoryPolicy?.mode == .auto, ctr.container.config.memoryBalloon {
+                await self.startAutoBalloon(container: ctr.container, config: ctr.config, recycle: false)
+            }
             return message.reply()
         }
     }
@@ -1531,6 +1654,8 @@ public actor RuntimeService {
     private func cleanUpContainer(containerInfo: ContainerInfo, exitStatus: ExitStatus? = nil) async throws {
         let container = containerInfo.container
         let id = container.id
+
+        await self.stopAutoBalloon()
 
         do {
             try await container.stop()

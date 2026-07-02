@@ -248,6 +248,38 @@ extension RuntimeClient {
         }
     }
 
+    public func setMemoryPolicy(_ policy: ContainerConfiguration.MemoryPolicy) async throws {
+        let request = XPCMessage(route: RuntimeRoutes.memoryPolicy.rawValue)
+        let data = try JSONEncoder().encode(policy)
+        request.set(key: RuntimeKeys.memoryPolicy.rawValue, value: data)
+        do {
+            try await self.client.send(request)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to set memory policy for container \(self.id)",
+                cause: error
+            )
+        }
+    }
+
+    public func memoryStatus() async throws -> MemoryStatus {
+        let request = XPCMessage(route: RuntimeRoutes.memoryStatus.rawValue)
+        do {
+            let reply = try await self.client.send(request)
+            guard let data = reply.dataNoCopy(key: RuntimeKeys.memoryStatus.rawValue) else {
+                throw ContainerizationError(.internalError, message: "empty memory status reply")
+            }
+            return try JSONDecoder().decode(MemoryStatus.self, from: data)
+        } catch {
+            throw ContainerizationError(
+                .internalError,
+                message: "failed to get memory status for container \(self.id)",
+                cause: error
+            )
+        }
+    }
+
     public func kill(_ id: String, signal: String) async throws {
         let request = XPCMessage(route: RuntimeRoutes.kill.rawValue)
         request.set(key: RuntimeKeys.id.rawValue, value: id)

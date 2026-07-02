@@ -46,6 +46,12 @@ public enum RuntimeKeys: String {
     /// Memory balloon target in bytes
     case memoryBytes
 
+    /// JSON-encoded memory policy
+    case memoryPolicy
+
+    /// JSON-encoded memory status
+    case memoryStatus
+
     /// Copy parameters
     case sourcePath
     case destinationPath
