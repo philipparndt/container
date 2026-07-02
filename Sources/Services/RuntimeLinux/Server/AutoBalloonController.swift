@@ -153,7 +153,13 @@ actor AutoBalloonController {
         let balloonBytes = self.policy.maxBytes > self.targetBytes ? self.policy.maxBytes - self.targetBytes : 0
         let usedBytes = info.totalBytes > info.availableBytes ? info.totalBytes - info.availableBytes : 0
         let workloadBytes = usedBytes > balloonBytes ? usedBytes - balloonBytes : 0
-        let desired = min(max(workloadBytes + self.policy.headroomBytes, self.policy.minBytes), self.policy.maxBytes)
+        // The guest kernel reserves part of the configured memory (MemTotal
+        // is below the configured size). The target is relative to the
+        // configured size, so the reservation must be added — otherwise it
+        // eats into the headroom and a tightly sized guest ends up under
+        // the pressure floor, oscillating boost/shrink forever.
+        let reservedBytes = self.policy.maxBytes > info.totalBytes ? self.policy.maxBytes - info.totalBytes : 0
+        let desired = min(max(workloadBytes + self.policy.headroomBytes + reservedBytes, self.policy.minBytes), self.policy.maxBytes)
 
         // The guest is close to running dry: deflate NOW and poll fast.
         // The guest's own deflate-on-OOM path frees pages far too slowly

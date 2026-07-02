@@ -76,11 +76,15 @@ public actor RuntimeService {
         }
 
         public func doExit(exitStatus: ExitStatus) {
-            for cc in continuations {
+            // Drain before resuming: doExit can be reached twice for the
+            // same waiter (a process exit racing container cleanup), and a
+            // CheckedContinuation traps on a second resume.
+            let pending = continuations
+            continuations = []
+            self.exitStatus = exitStatus
+            for cc in pending {
                 cc.resume(returning: exitStatus)
             }
-
-            self.exitStatus = exitStatus
         }
     }
 
