@@ -70,6 +70,11 @@ actor AutoBalloonController {
     private static let errorInterval: Duration = .seconds(30)
     /// Ignore target changes smaller than this to avoid balloon churn.
     private static let hysteresisBytes: UInt64 = 256.mib()
+    /// Never shrink the target by more than this per tick: a single stale
+    /// or racy guest reading must not strangle the workload in one step —
+    /// the next tick corrects course. Stepped descent also gives the
+    /// hypervisor small, freshly ballooned batches to release.
+    private static let maxShrinkPerTick: UInt64 = 2048.mib()
 
     init(
         container: LinuxContainer,
@@ -181,10 +186,15 @@ actor AutoBalloonController {
             return Self.pressureInterval
         }
         if self.targetBytes - desired >= Self.hysteresisBytes {
+            let step = max(desired, self.targetBytes - Self.maxShrinkPerTick)
             self.logger.info(
                 "auto balloon: reclaiming",
-                metadata: ["workload": "\(workloadBytes)", "target": "\(desired)"])
-            await self.setTarget(desired)
+                metadata: ["workload": "\(workloadBytes)", "target": "\(step)"])
+            await self.setTarget(step)
+            if step > desired {
+                // still descending: keep stepping promptly
+                return Self.pressureInterval
+            }
         }
         return Self.interval
     }

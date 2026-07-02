@@ -795,25 +795,29 @@ public actor RuntimeService {
         self.log.debug("enter", metadata: ["func": "\(#function)"])
         defer { self.log.debug("exit", metadata: ["func": "\(#function)"]) }
 
-        return try await self.lock.withLock { _ in
+        // Take references under the lock, but read the guest outside it: a
+        // memory-starved guest answers slowly (or not at all), and holding
+        // the service lock across that read wedges every other route —
+        // including the deflate that would rescue the guest.
+        let (container, controller) = try await self.lock.withLock { _ -> (LinuxContainer, AutoBalloonController?) in
             guard case .running = await self.state else {
                 throw ContainerizationError(.invalidState, message: "sandbox is not running")
             }
             let ctr = try await self.getContainer()
-            let info = try await ctr.container.guestMemoryInfo()
-            let controller = await self.autoBalloon
-            let status = MemoryStatus(
-                policyMode: controller == nil ? .manual : .auto,
-                targetBytes: await controller?.currentTarget,
-                guestTotalBytes: info.totalBytes,
-                guestFreeBytes: info.freeBytes,
-                guestAvailableBytes: info.availableBytes
-            )
-            let reply = message.reply()
-            let data = try JSONEncoder().encode(status)
-            reply.set(key: RuntimeKeys.memoryStatus.rawValue, value: data)
-            return reply
+            return (ctr.container, await self.autoBalloon)
         }
+        let info = try await container.guestMemoryInfo()
+        let status = MemoryStatus(
+            policyMode: controller == nil ? .manual : .auto,
+            targetBytes: await controller?.currentTarget,
+            guestTotalBytes: info.totalBytes,
+            guestFreeBytes: info.freeBytes,
+            guestAvailableBytes: info.availableBytes
+        )
+        let reply = message.reply()
+        let data = try JSONEncoder().encode(status)
+        reply.set(key: RuntimeKeys.memoryStatus.rawValue, value: data)
+        return reply
     }
 
     /// Start the automatic balloon controller for the sandbox.
